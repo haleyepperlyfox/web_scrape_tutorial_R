@@ -1,0 +1,333 @@
+---
+title: "Web scraping tutorial in R"
+author: Haley Fox
+date: June 20, 2022
+toc: true
+toc-depth: 2
+number-sections: true
+number-depth: 2
+highlight-style: pygments
+format: html
+editor: visual
+---
+
+## Why I created this tutorial
+
+Have you ever come across relevant data but there was no way to export that data? Well that's what happened to me when I stumbled upon this [website](https://farm.ewg.org/) with information on agricultural subsidies in the US. I first reached out to the organization that manages this website to see if they would send me the data (always a good easy first step!) but they said no due to time/staff constraints 😭
+
+Rather than manually trying to copy \>100,000 data points that would no doubt be riddled with human errors, I decided to embark on my first web scraping experience. I'm by no means an expert, but hopefully someone else is able to use what I learned in their own scraping adventure!
+
+## About the website and data  {#sec-about}
+
+This [website](https://farm.ewg.org/), managed by the Environmental Working Group, provides the amount of agricultural subsidies each county in the United States received annually since 2010. These data are available to preview by hovering over each county on an interactive map, with each state and each year being on a separate webpage. Subsidy information is provided in five categories: 1. total subsidies, 2. commodity subsidies, 3. conservation subsidies, 4. disaster subsidies, and 5. crop insurance subsidies. Here is an example navigating from the main webpage to Oregon, then to the year 2012, and then hovering over counties to observe the amount of subsidies that county received in 2012.
+
+![](Figures/website_ex_3_cut.gif){fig-alt="A gif starting at a website with a map of the United States, then clicking on Oregon, which brings up a new webpage with information on agricultural subsidies in Oregon where you can hover the cursor over Oregon counties and a pop-up will display the amount of subsidies that county received for the selected year."}
+
+As you select different states or years, the url changes in two key ways. The url includes reference to the state through a unique identifying code called a FIPS code. For example: https://farm.ewg.org/region.php?***fips=41000***&progcode=total&yr=2012
+
+Each state has a 2 digit FIPS code and each county within a state has an additional 3 digit FIPS code, which is added to the state FIPS code to create a unique identifier for every county in the USA. For example, for Oregon the FIPS code is 41, for Deschutes County, Oregon, the additional values are 017, making the full Deschutes County FIPS code 41017. These FIPS codes will be important throughout this tutorial. The urls for these sites are referring only to the state level, so the state FIPS code is followed by 000.
+
+The url also includes reference to the year selected. Using the previous example, we can see that the year 2012 is selected. https://farm.ewg.org/region.php?fips=41000&progcode=total&***yr=2012***
+
+If we go instead to Washington (FIPS code = 53) in the year 2017, this is the url: https://farm.ewg.org/region.php?***fips=53000***&progcode=total&***yr=2017***
+
+## Finding the website's relevant source code
+
+To scrape the subsidies data in R, we need to find the source code (e.g., HTML, CSS) of the interactive subsidies map on the website. To view the source code, in Google Chrome right click on the section of the website that you're interested in, and click Inspect. This will bring up a new panel with all of the source code for the website, and you should be brought to the specific elements of the section you selected. You can play around in the elements panel, hovering over different sections and seeing what is highlighted on the website, meaning that is the corresponding source code for that section. [Here](https://blog.hubspot.com/website/how-to-inspect#:~:text=To%20inspect%20elements%20you%20have,PC%20to%20do%20the%20same.) is a blogpost about the Inspect button if you want more information.
+
+While I did read a bit about this Inspect tool and it seems useful in other situations, it didn't work quite so easily for me. When I right clicked over the map, I was not brought to the part of the source code with the data, but rather something I think that had to do with plotting the map boundaries. I think this may be because I was trying to get data that was visible by hovering over an interactive map, so it made it a bit more complex. But I was able to find the source code for the map data by scrolling around in the elements panel until I found the chunk of code that looked correct. You can see in the image below how the highlighted code chunk has the county names and values for subsidies, which correspond to the map.
+
+![](Figures/EWG_inspect_screenshot.png){fig-alt="An image of a website with a map titled Total Subsidies, Oregon, 2012 with the right half of the website covered by a panel that shows the source code for the website." dpi="300"}\
+\
+\
+\
+Once you have identified your element of interest, right click on it and select copy \> copy selector. Here is an example with this website.
+
+![](Figures/element_panel_3.gif){fig-alt="A gif with the raw HTML of a website where the user right clicks on an HTLM element and selects copy, then copy selector."}
+
+When you paste the element path that you have copied, it will look like this: **'#main_content_area \> script:nth-child(7)'**. We will use this in R to identify the section of the website's source code that we want to bring into R.
+
+## Let's get started!
+
+The objective of this script is to scrape agricultural subsidies data (4 categories of subsidies plus total subsidies) for each year available (2010 - 2019) for every county in the USA. Let's load in the packages that will help us do that, most notably `rvest`, a package designed to help you scrape (or harvest) data from webpages. Nearly all of the packages I used are automatically loaded with the `tidyverse` package, but I've loaded them individually here so we can see what we're actually using.
+
+```{r}
+#| label: load-packages
+#| message: false
+
+if (!require(librarian)) {
+  install.packages("librarian")
+  library(librarian)
+}
+
+librarian::shelf(rvest, #scrapes html data from HTML webpages (in tidyverse)
+                 magrittr, #pipe operator (in tidyverse)
+                 stringr, #cleans up string (in tidyverse)
+                 tidyr, #helps tidy data (in tidyverse)
+                 dplyr, #allows you to manipulate data (in tidyverse)
+                 tibble, #used to add a column to a dataframe in this code (in tidyverse)
+                 tidycensus) #includes unique census identifying codes (i.e., FIPS)
+```
+
+First we'll go through this process to scrape data for only one state in one year. We will use Washington in 2017 as our example. Here is the [link](https://farm.ewg.org/region.php?fips=53000&progcode=total&yr=2017) to the example webpage. At the end we'll combine this all into a pipe and loop it to get data from all of the states and years.
+
+### Step 1.
+
+Read in the html code using `read_html` from the `rvest` package by simply pasting the url of the website.
+
+```{r}
+#| label: read-html
+
+html_text <- read_html('https://farm.ewg.org/region.php?fips=53000&progcode=total&yr=2017')
+```
+
+### Step 2.
+
+Read in the element we previously identified **'#main_content_area \> script:nth-child(7)'** which is the code for the portion of the webpage that we are interested in, the map data.
+
+```{r}
+#| label: read-html-element
+
+html_element <- html_elements(html_text, "#main_content_area > script:nth-child(7)")
+```
+
+### Step 3.
+
+Convert the html to text so that we can manipulate it in R.
+
+```{r}
+#| label: html-to-text
+
+text <- html_text2(html_element)
+```
+
+We now have a large block of text read into R. This text is everything we previously identified as the map data when looking at the website's html source code. Here is what the start of the text block looks like.
+
+![](Figures/text_screenshot.png){fig-alt="An image of a chunk of text." dpi="300"}
+
+We can see that each county starts with their unique five digit identifying code, which is called a FIPS code (ex. 53001). These FIPS codes have `\C` before them in the text.
+
+### Step 4.
+
+We need to split up this big chunk of text by county. The code below says to split the text every time there is a `C` followed by 5 numbers after it ranging from 0 to 9. This part of the code `(?<=.)` says to keep the FIPS code (i.e., the delimiter), rather than deleting it, and attach it to the next chunk of text. So this makes sure that the FIPS codes stay with the subsidies data for the correct county.
+
+```{r}
+#| label: split-by-fips
+
+text_counties <- strsplit(text, "(?<=.)(?=(C[0-9]{5}))", perl = TRUE)
+text_counties_df <- as.data.frame(text_counties)
+```
+
+### Step 5.
+
+We can see that the first row of the dataframe does not start with a FIPS code like the other rows do. This was the html text that was included before the first FIPS code and we can delete that row.
+
+```{r}
+#| label: delete-row-1
+
+#view the first two rows of the dataframe
+text_counties_df[1:2,]
+counties_df <- as.data.frame(text_counties_df[-1,])
+```
+
+### Step 6.
+
+Now we want to create two columns, one with the FIPS code and the other one with all the rest of the text, which includes the subsidies data. First we need to identify a consistent delimiter between the FIPS code and the rest of the data. By looking at the first row of the dataframe, we can see that after the FIPS code and before the first subsidy amount, there is the word `value`. This word does not appear anywhere else except after each FIPS code. We can separate the FIPS code from the rest of the text using `",value` as the delimiter. Here we don't want to keep that delimiter, so we are fine with it being deleted. Since there is a `"` in the delimiter, we have to "escape" it, which just means putting `\\` before it so that R doesn't think it means something else in the code.
+
+```{r}
+#| label: split-fips-and-subsidies
+
+#view the first row of the dataframe
+counties_df[1,]
+df_2_cols <- str_split_fixed(counties_df[,1], '\\",value', 2)
+df_2_cols <- as.data.frame(df_2_cols)
+
+#view the first two columns of the first row of the dataframe
+df_2_cols[1,1:2]
+```
+
+### Step 7.
+
+Now we want to separate column 2, the big chunk of text with all of the subsidies data, into separate columns for each subsidy type. We can see that each subsidy amount begins with a `$` and we know that we have 5 subsidies (total, commodity, conservation, disaster, and insurance). Since the text before the first `$` will be kept, we have to specify that column 2 should be separated into 6 columns. Again we have to "escape" the character `$` with `\\`.
+
+```{r}
+#| code-overflow: wrap
+#| label: split-subsidy-categories
+
+#view the second column of the first row of the dataframe
+df_2_cols[1,2]
+separated_subsidies <- separate(df_2_cols, col = V2, sep='\\$', into=c('x','total','commodity','conservation', 'disaster','insurance'), remove=TRUE) 
+```
+
+### Step 8.
+
+The first new column that was created was just the text before the first `$`, so let's delete it.
+
+```{r}
+#| label: delete-column-1
+
+separated_subsidies <- separated_subsidies[,-2]
+```
+
+### Step 9.
+
+Now we need to get rid of all the text after the subsidy amount in each column. We can look at the dataframe and see what comes after the subsidy amounts. For the total subsidy column, there is a `</b>` after the subsidy amount. For all of the other subsidy columns, there is a `</td>`. We're using `gsub` to replace the pattern that we specify (`</b>` or `</td>`) and we're specifying `""` as the replacement because we want everything after the pattern removed. We use `lapply` to apply this function over multiple columns in the dataframe.
+
+```{r}
+#| code-overflow: wrap
+#| label: delete-text-after-subsidies
+
+#view the second through sixth column of the first row of the dataframe (this looks wonky because each column has so much text)
+separated_subsidies[1,2:6]
+
+separated_subsidies[,c(3:6)] <-lapply(separated_subsidies[,c(3:6)], gsub, pattern = '</td>.*', replacement = "")
+separated_subsidies[,2] <- gsub(separated_subsidies[,2], pattern = '</b>.*', replacement = "")
+```
+
+### Step 10.
+
+The subsidy values include commas, which we need to remove to be able to read those values as numbers rather than characters. We use `gsub` and `lapply` again to replace all commas with nothing.
+
+```{r}
+#| code-overflow: wrap
+#| label: delete-commas
+
+separated_subsidies[,c(2:6)] <-lapply(separated_subsidies[,c(2:6)], gsub, pattern = ',', replacement = "")
+```
+
+### Step 11.
+
+Let's add in a year variable so we remember that these data are from 2017.
+
+```{r}
+#| label: add-year
+
+separated_subsidies$year <- 2017
+```
+
+### Step 12.
+
+Rename the first column from V1 to `fips`.
+
+```{r}
+#| label: rename-fips
+
+subsidies_df_WA_17 <- rename(separated_subsidies, fips = V1)
+```
+
+### Step 13.
+
+Lastly, remove the leading `C` on FIPS codes as this is not actually part of a real FIPS code.
+
+```{r}
+#| label: remove-C-from-fips
+
+subsidies_df_WA_17[,1] <- gsub(subsidies_df_WA_17[,1], pattern = 'C', replacement = "")
+head(subsidies_df_WA_17)
+```
+
+Magic! 🧙
+
+Now we have a dataframe with the first column as the county identifier (i.e., FIPS code) and the subsequent columns as the amount of each subsidy that county received in 2017.
+
+## Making a function with pipes
+
+Now that we've gone through how to copy and format the data for one webpage (Washington in 2017), we can combine all of those steps into a function where we can input different urls to get data from other states and years. We will connect the steps using pipes, which are available from the `magrittr` package as part of the `tidyverse`. Pipes, which look like this `%>%`, allows you to pipe a value forward into an expression or function call.
+
+Since I wanted each step connected in a pipe, there were some slight variations I had to make to the code. For example, when using `gsub` to replace patterns in multiple columns. I previously used `lapply` to apply the replacement function over multiple columns, but I couldn't get that to work in this piped function. Therefore, I specified each subsidy column in which I wanted to remove all characters after `</td>` or `</b>` and in which I wanted to remove the `,` from the subsidy amounts. I used `mutate`from the `dplyr` package, also in the `tidyverse`, to overwrite existing variables (i.e., column names) with the same name (e.g., commodity).
+
+In @sec-about, I explained how the url includes reference to the state FIPS code and year for each relevant webpage. We can use these simple changes to the url to our advantage. We can specify the first part of the url for the state we are interested in by writing in a FIPS code and then vary the year to get data for that state from different years.
+
+```{r}
+#| label: function-for-web-scrape
+
+sub_scrape <- function(url, year){ 
+  read_html(paste0(url,year)) %>% 
+  html_elements("#main_content_area > script:nth-child(7)") %>% 
+  html_text2() %>% 
+  strsplit("(?<=.)(?=(C[0-9]{5}))",perl = TRUE) %>% 
+  as.data.frame() %>% 
+  .[-1,] %>% 
+  str_split_fixed('\\",value', 2) %>% 
+  as.data.frame() %>% 
+  separate(V2, sep='\\$', into=c('x','total','commodity','conservation',
+                                 'disaster','insurance'), remove=TRUE) %>% 
+  .[,-2] %>% 
+  mutate(total = gsub('</b>.*', "", total)) %>% 
+  mutate(commodity = gsub('</td>.*', "", commodity)) %>% 
+  mutate(conservation = gsub('</td>.*', "", conservation)) %>%  
+  mutate(disaster = gsub('</td>.*', "", disaster)) %>% 
+  mutate(insurance = gsub('</td>.*', "", insurance)) %>% 
+  mutate(total = as.numeric(gsub(',', "", total))) %>% 
+  mutate(commodity = as.numeric(gsub(',', "", commodity))) %>% 
+  mutate(conservation = as.numeric(gsub(',', "", conservation))) %>%  
+  mutate(disaster = as.numeric(gsub(',', "", disaster))) %>% 
+  mutate(insurance = as.numeric(gsub(',', "", insurance))) %>% 
+  add_column(Year = year) %>% 
+  rename(fips = V1) %>% 
+  mutate(fips = as.numeric(gsub('C', "", fips)))
+}
+```
+
+Now let's test the function with the url for Washington, specifying the year 2017, so that we can compare it to our previously formatted dataframe from the step by step instructions.
+
+```{r}
+#| label: test-function
+
+test_WA_17 <- sub_scrape('https://farm.ewg.org/region.php?fips=53000&progcode=total&yr=', 2017)
+head(test_WA_17)
+#original dataframe from step by step instructions
+head(subsidies_df_WA_17)
+```
+
+It works! 🎆
+The dataframe created from the `sub_scrape` function is exactly the same as the dataframe created from the step by step instructions. I did also check both dataframes I created against the actual website's map data to make sure it was accurate, which is always good practice.
+
+## Creating a for loop
+
+Now that we have this function to scrape subsidies data for a given state and year, we can create a for loop to run through all states and years. (I know some people are transitioning from for loops to using `map` in the `purrr` package, so feel free to try that out on your own!)
+
+To run a for loop, we need a vector that includes all values of state FIPS codes that we can loop through. A dataframe with state name, state FIPS, county name, and county FIPS is included in the `tidycensus` package. You read it in by calling `fips_codes` and saving it as a new dataframe so that it appears in your environment.
+
+```{r}
+#| label: load-fips-codes
+
+fips_ids <- fips_codes
+```
+
+The `tidycensus` FIPS dataframe includes the 2 digit state FIPS, but the subsidies urls use the 2 digit state FIPS followed by 000. Therefore, we add 000 to the end of each state FIPS in our dataframe to match the url format. The FIPS code dataframe we read in from the `tidycensus` package has rows for every county, so there are duplicates in the state FIPS column. We don't need rows for every county because the urls are at the state level, therefore we remove all duplicates of state FIPS (i.e., each county in a state) so that we are left with only one row per state FIPS. Lastly, the subsidies website does not contain information on US territories, which have FIPS codes over 60. Therefore, we remove all rows with FIPS codes over 60,000.
+
+```{r}
+#| label: format-fips-codes
+
+states_fips <- paste0(fips_ids$state_code, "000") %>% 
+  unique() %>% 
+  .[. < 60000]
+```
+
+Now lets create the for loop to run through all states and years. First we create an empty dataframe called `subsidies_data`. We will fill this empty dataframe with the subsidies data as we bring it in and format it.
+
+We are actually creating a for loop within a for loop, or a nested for loop. The first for loop starting with `for(year in 2010:2019)` says that for a given state's url, run the `sub_scrape` function for each year from 2010 through 2019. After each year of data is scraped and formatted, `rbind` says to row-bind the new year's dataframe with the rest of the data. Since all of the variable names are the same, the `rbind` function just sticks the new year's dataframe to the bottom of the existing dataframe, so the dataframe keeps growing with every new year of data added.
+
+The second for loop starting with `for(state_fip in state_fips)` tells the url to loop through all possible state FIPS codes when creating the `url`. We replace the 5 digit FIPS code in the url with `%s` and `sprintf` says to replace the `%s` with the `state_fip`. `sprintf` is a wrapper for the system `sprintf` C-library function. 
+
+Putting these two for loops together, we start with one state's webpage, then we loop through all years of that state's data, scraping, formatting, and binding each year together. Then we move on to the next state's webpage, and so on with all states and years. All of the data (31,860 rows and 7 columns) are saved in the `subsidies_data` dataframe. Again, it is good practice here to make sure the data look accurate with some spot checks on the website.
+
+```{r}
+#| output: false
+#| label: loop-through-years-states
+#| eval: false
+
+subsidies_data <- data.frame()
+
+for(state_fip in states_fips){
+url <- sprintf('https://farm.ewg.org/region.php?fips=%s&progcode=total&yr=', state_fip)
+for(year in 2010:2019){ 
+  subsidies_data_year <- sub_scrape(url,year)
+subsidies_data <- rbind(subsidies_data_year, subsidies_data)
+print(subsidies_data)
+}
+}
+```
+
+Now you have a dataframe with how much money each county received in agricultural subsidies by category from 2010 through 2019! 🥳
