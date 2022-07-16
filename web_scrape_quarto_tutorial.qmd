@@ -13,13 +13,13 @@ editor: visual
 
 ## Why I created this tutorial
 
-Have you ever come across relevant data but there was no way to export that data? Well that's what happened to me when I stumbled upon this [website](https://farm.ewg.org/) with information on agricultural subsidies in the US. I first reached out to the organization that manages this website to see if they would send me the data (always a good easy first step!) but they said no due to time/staff constraints 😭
+Have you ever come across relevant data but there was no way to export that data? Well that's what happened to me when I stumbled upon this [website](https://farm.ewg.org/){target="_blank"} with information on agricultural subsidies in the US. I first reached out to the organization that manages this website to see if they would send me the data (always a good easy first step!) but they said no due to time/staff constraints 😭
 
 Rather than manually trying to copy \>100,000 data points that would no doubt be riddled with human errors, I decided to embark on my first web scraping experience. I'm by no means an expert, but hopefully someone else is able to use what I learned in their own scraping adventure!
 
-## About the website and data  {#sec-about}
+## About the website and data {#sec-about}
 
-This [website](https://farm.ewg.org/), managed by the Environmental Working Group, provides the amount of agricultural subsidies each county in the United States received annually since 2010. These data are available to preview by hovering over each county on an interactive map, with each state and each year being on a separate webpage. Subsidy information is provided in five categories: 1. total subsidies, 2. commodity subsidies, 3. conservation subsidies, 4. disaster subsidies, and 5. crop insurance subsidies. Here is an example navigating from the main webpage to Oregon, then to the year 2012, and then hovering over counties to observe the amount of subsidies that county received in 2012.
+This [website](https://farm.ewg.org/){target="_blank"}, managed by the Environmental Working Group, provides the amount of agricultural subsidies each county in the United States received annually since 2010. These data are available to preview by hovering over each county on an interactive map, with each state and each year being on a separate webpage. Subsidy information is provided in five categories: 1. total subsidies, 2. commodity subsidies, 3. conservation subsidies, 4. disaster subsidies, and 5. crop insurance subsidies. Here is an example navigating from the main webpage to Oregon, then to the year 2012, and then hovering over counties to observe the amount of subsidies that county received in 2012.
 
 ![](Figures/website_ex_3_cut.gif){fig-alt="A gif starting at a website with a map of the United States, then clicking on Oregon, which brings up a new webpage with information on agricultural subsidies in Oregon where you can hover the cursor over Oregon counties and a pop-up will display the amount of subsidies that county received for the selected year."}
 
@@ -33,7 +33,7 @@ If we go instead to Washington (FIPS code = 53) in the year 2017, this is the ur
 
 ## Finding the website's relevant source code
 
-To scrape the subsidies data in R, we need to find the source code (e.g., HTML, CSS) of the interactive subsidies map on the website. To view the source code, in Google Chrome right click on the section of the website that you're interested in, and click Inspect. This will bring up a new panel with all of the source code for the website, and you should be brought to the specific elements of the section you selected. You can play around in the elements panel, hovering over different sections and seeing what is highlighted on the website, meaning that is the corresponding source code for that section. [Here](https://blog.hubspot.com/website/how-to-inspect#:~:text=To%20inspect%20elements%20you%20have,PC%20to%20do%20the%20same.) is a blogpost about the Inspect button if you want more information.
+To scrape the subsidies data in R, we need to find the source code (e.g., HTML, CSS) of the interactive subsidies map on the website. To view the source code, in Google Chrome right click on the section of the website that you're interested in, and click Inspect. This will bring up a new panel with all of the source code for the website, and you should be brought to the specific elements of the section you selected. You can play around in the elements panel, hovering over different sections and seeing what is highlighted on the website, meaning that is the corresponding source code for that section. [Here](https://blog.hubspot.com/website/how-to-inspect#:~:text=To%20inspect%20elements%20you%20have,PC%20to%20do%20the%20same.){target="_blank"} is a blogpost about the Inspect button if you want more information.
 
 While I did read a bit about this Inspect tool and it seems useful in other situations, it didn't work quite so easily for me. When I right clicked over the map, I was not brought to the part of the source code with the data, but rather something I think that had to do with plotting the map boundaries. I think this may be because I was trying to get data that was visible by hovering over an interactive map, so it made it a bit more complex. But I was able to find the source code for the map data by scrolling around in the elements panel until I found the chunk of code that looked correct. You can see in the image below how the highlighted code chunk has the county names and values for subsidies, which correspond to the map.
 
@@ -280,8 +280,7 @@ head(test_WA_17)
 head(subsidies_df_WA_17)
 ```
 
-It works! 🎆
-The dataframe created from the `sub_scrape` function is exactly the same as the dataframe created from the step by step instructions. I did also check both dataframes I created against the actual website's map data to make sure it was accurate, which is always good practice.
+It works! 🎆 The dataframe created from the `sub_scrape` function is exactly the same as the dataframe created from the step by step instructions. I did also check both dataframes I created against the actual website's map data to make sure it was accurate, which is always good practice.
 
 ## Creating a for loop
 
@@ -309,7 +308,7 @@ Now lets create the for loop to run through all states and years. First we creat
 
 We are actually creating a for loop within a for loop, or a nested for loop. The first for loop starting with `for(year in 2010:2019)` says that for a given state's url, run the `sub_scrape` function for each year from 2010 through 2019. After each year of data is scraped and formatted, `rbind` says to row-bind the new year's dataframe with the rest of the data. Since all of the variable names are the same, the `rbind` function just sticks the new year's dataframe to the bottom of the existing dataframe, so the dataframe keeps growing with every new year of data added.
 
-The second for loop starting with `for(state_fip in state_fips)` tells the url to loop through all possible state FIPS codes when creating the `url`. We replace the 5 digit FIPS code in the url with `%s` and `sprintf` says to replace the `%s` with the `state_fip`. `sprintf` is a wrapper for the system `sprintf` C-library function. 
+The second for loop starting with `for(state_fip in state_fips)` tells the url to loop through all possible state FIPS codes when creating the `url`. We replace the 5 digit FIPS code in the url with `%s` and `sprintf` says to replace the `%s` with the `state_fip`. `sprintf` is a wrapper for the system `sprintf` C-library function.
 
 Putting these two for loops together, we start with one state's webpage, then we loop through all years of that state's data, scraping, formatting, and binding each year together. Then we move on to the next state's webpage, and so on with all states and years. All of the data (31,860 rows and 7 columns) are saved in the `subsidies_data` dataframe. Again, it is good practice here to make sure the data look accurate with some spot checks on the website.
 
